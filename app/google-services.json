@@ -1,0 +1,39 @@
+{
+  "project_info": {
+    "project_number": "313348818810",
+    "project_id": "betterfly-e7452",
+    "storage_bucket": "betterfly-e7452.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:313348818810:android:bac4e791a92d2ec51338c3",
+        "android_client_info": {
+          "package_name": "com.betterfly.app"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "313348818810-kc2fpfuihssrnvgghbr58va60ogh0h35.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAarHoU31T2UjG2WBTvPPWabQEpUfPgVHA"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "313348818810-kc2fpfuihssrnvgghbr58va60ogh0h35.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
