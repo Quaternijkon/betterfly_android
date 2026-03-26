@@ -1,0 +1,26 @@
+# --- 编译输出与缓存 ---
+build/
+.gradle/
+bin/
+gen/
+out/
+.kotlin/
+
+# --- IDE 配置文件 (IntelliJ/Android Studio) ---
+.idea/
+*.iml
+*.iws
+*.ipr
+
+# --- 内存快照与日志 (重点！处理你截图里的巨型文件) ---
+*.hprof
+*.log
+
+# --- 本地环境配置 (包含敏感路径，切勿提交) ---
+local.properties
+.DS_Store
+
+# --- Android 特定 ---
+captures/
+.externalNativeBuild/
+.cxx/

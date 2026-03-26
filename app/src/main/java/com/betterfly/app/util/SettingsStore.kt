@@ -11,10 +11,12 @@ import com.betterfly.app.data.PendingSyncOp
 import com.betterfly.app.data.UserSettings
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.serialization.builtins.serializer
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -57,15 +59,15 @@ class SettingsStore @Inject constructor(@ApplicationContext private val ctx: Con
     val pendingDeletes: Flow<PendingDeletes> = ctx.dataStore.data.map { prefs ->
         val raw = prefs[Keys.PENDING_DELETES_JSON]
         if (raw.isNullOrBlank()) PendingDeletes()
-        else runCatching { json.decodeFromString(PendingDeletes.serializer(), raw) }.getOrElse { PendingDeletes() }
+        else runCatching { json.decodeFromString<PendingDeletes>(raw) }.getOrElse { PendingDeletes() }
     }
 
     suspend fun setPendingDeletes(value: PendingDeletes) {
-        ctx.dataStore.edit { it[Keys.PENDING_DELETES_JSON] = json.encodeToString(PendingDeletes.serializer(), value) }
+        ctx.dataStore.edit { it[Keys.PENDING_DELETES_JSON] = json.encodeToString(value) }
     }
 
     suspend fun addPendingDelete(type: String, id: String) {
-        val now = pendingDeletesOnce()
+        val now = pendingDeletes.first()
         val updated = when (type) {
             "sessions" -> now.copy(sessions = (now.sessions + id).distinct())
             "events" -> now.copy(events = (now.events + id).distinct())
@@ -82,19 +84,19 @@ class SettingsStore @Inject constructor(@ApplicationContext private val ctx: Con
         val raw = prefs[Keys.PENDING_SYNC_QUEUE_JSON]
         if (raw.isNullOrBlank()) emptyList()
         else runCatching {
-            json.decodeFromString(ListSerializer(PendingSyncOp.serializer()), raw)
+            json.decodeFromString<List<PendingSyncOp>>(raw)
         }.getOrElse { emptyList() }
     }
 
     suspend fun setPendingSyncQueue(queue: List<PendingSyncOp>) {
         ctx.dataStore.edit {
             if (queue.isEmpty()) it.remove(Keys.PENDING_SYNC_QUEUE_JSON)
-            else it[Keys.PENDING_SYNC_QUEUE_JSON] = json.encodeToString(ListSerializer(PendingSyncOp.serializer()), queue)
+            else it[Keys.PENDING_SYNC_QUEUE_JSON] = json.encodeToString(queue)
         }
     }
 
     suspend fun enqueueSync(op: PendingSyncOp) {
-        val q = pendingSyncQueueOnce().toMutableList()
+        val q = pendingSyncQueue.first().toMutableList()
         q.add(op)
         setPendingSyncQueue(q)
     }
@@ -107,29 +109,14 @@ class SettingsStore @Inject constructor(@ApplicationContext private val ctx: Con
         val raw = prefs[Keys.OVERVIEW_LAYOUT_JSON]
         if (raw.isNullOrBlank()) emptyList()
         else runCatching {
-            json.decodeFromString(ListSerializer(String.serializer()), raw)
+            json.decodeFromString<List<String>>(raw)
         }.getOrElse { emptyList() }
     }
 
     suspend fun setOverviewLayout(layout: List<String>) {
         ctx.dataStore.edit {
             if (layout.isEmpty()) it.remove(Keys.OVERVIEW_LAYOUT_JSON)
-            else it[Keys.OVERVIEW_LAYOUT_JSON] = json.encodeToString(ListSerializer(String.serializer()), layout)
+            else it[Keys.OVERVIEW_LAYOUT_JSON] = json.encodeToString(layout)
         }
     }
-
-    private suspend fun pendingDeletesOnce(): PendingDeletes =
-        pendingDeletes.map { it }.firstValue()
-
-    private suspend fun pendingSyncQueueOnce(): List<PendingSyncOp> =
-        pendingSyncQueue.map { it }.firstValue()
-}
-
-private suspend fun <T> Flow<T>.firstValue(): T {
-    var v: T? = null
-    kotlinx.coroutines.flow.first { value ->
-        v = value
-        true
-    }
-    return v!!
 }
