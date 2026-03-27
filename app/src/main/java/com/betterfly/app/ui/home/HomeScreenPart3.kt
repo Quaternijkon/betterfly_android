@@ -1,10 +1,7 @@
 package com.betterfly.app.ui.home
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -13,31 +10,9 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.betterfly.app.data.Session
-import com.betterfly.app.util.parseHexColor
-import java.util.*
-
-internal fun getPeriodStart(period: String, weekStart: Int): Long {
-    val cal = Calendar.getInstance()
-    when (period) {
-        "week" -> {
-            val firstDay = if (weekStart == 1) Calendar.MONDAY else Calendar.SUNDAY
-            while (cal.get(Calendar.DAY_OF_WEEK) != firstDay) cal.add(Calendar.DAY_OF_YEAR, -1)
-            cal.set(Calendar.HOUR_OF_DAY, 0); cal.set(Calendar.MINUTE, 0)
-            cal.set(Calendar.SECOND, 0); cal.set(Calendar.MILLISECOND, 0)
-        }
-        else -> {
-            cal.set(Calendar.DAY_OF_MONTH, 1)
-            cal.set(Calendar.HOUR_OF_DAY, 0); cal.set(Calendar.MINUTE, 0)
-            cal.set(Calendar.SECOND, 0); cal.set(Calendar.MILLISECOND, 0)
-        }
-    }
-    return cal.timeInMillis
-}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
