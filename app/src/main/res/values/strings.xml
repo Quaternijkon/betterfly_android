@@ -1,3 +1,5 @@
 <resources>
     <string name="app_name">BetterFly</string>
+    <!-- Google Sign-In Web Client ID from google-services.json -->
+    <string name="default_web_client_id">313348818810-kc2fpfuihssrnvgghbr58va60ogh0h35.apps.googleusercontent.com</string>
 </resources>

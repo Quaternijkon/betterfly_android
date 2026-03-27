@@ -33,56 +33,34 @@ class HomeViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     val activeSessions: StateFlow<Map<String, Session>> = repo.observeSessions()
-        .map { list ->
-            list.filter { it.endTime == null }
-                .associateBy { it.eventId }
-        }
+        .map { list -> list.filter { it.endTime == null }.associateBy { it.eventId } }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyMap())
 
     fun startSession(event: EventType) {
         viewModelScope.launch {
-            val exists = repo.getActiveSession(event.id)
-            if (exists != null) return@launch
+            if (repo.getActiveSession(event.id) != null) return@launch
             repo.saveSession(
-                Session(
-                    id = newId(),
-                    eventId = event.id,
-                    startTime = System.currentTimeMillis()
-                )
+                Session(id = newId(), eventId = event.id, startTime = System.currentTimeMillis())
             )
         }
     }
 
     fun stopSession(session: Session, note: String? = null, rating: Int? = null, incomplete: Boolean = false) {
         viewModelScope.launch {
-            repo.saveSession(
-                session.copy(
-                    endTime = System.currentTimeMillis(),
-                    note = note,
-                    rating = rating,
-                    incomplete = incomplete
-                )
-            )
+            repo.saveSession(session.copy(endTime = System.currentTimeMillis(), note = note, rating = rating, incomplete = incomplete))
         }
     }
 
     fun quickStop(session: Session) {
-        viewModelScope.launch {
-            repo.saveSession(session.copy(endTime = System.currentTimeMillis()))
-        }
+        viewModelScope.launch { repo.saveSession(session.copy(endTime = System.currentTimeMillis())) }
     }
 
-    fun createEvent(name: String, color: String) {
+    fun createEvent(name: String, color: String, tags: List<String> = emptyList()) {
         if (name.isBlank()) return
         viewModelScope.launch {
             repo.saveEventType(
-                EventType(
-                    id = newId(),
-                    name = name.trim(),
-                    color = color,
-                    archived = false,
-                    createdAt = System.currentTimeMillis()
-                )
+                EventType(id = newId(), name = name.trim(), color = color, archived = false,
+                    createdAt = System.currentTimeMillis(), tags = tags)
             )
         }
     }
