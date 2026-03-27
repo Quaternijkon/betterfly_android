@@ -6,17 +6,20 @@ import com.betterfly.app.data.Session
 import com.betterfly.app.data.UserSettings
 import com.betterfly.app.data.local.dao.EventTypeDao
 import com.betterfly.app.data.local.dao.SessionDao
-import com.betterfly.app.data.local.entity.EventTypeEntity
-import com.betterfly.app.data.local.entity.SessionEntity
 import com.betterfly.app.data.remote.FirestoreDataSource
+import com.betterfly.app.data.toDomain
+import com.betterfly.app.data.toEntity
 import com.betterfly.app.util.SettingsStore
 import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.auth.FirebaseUser
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.encodeToString
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -29,6 +32,27 @@ class BetterFlyRepository @Inject constructor(
     private val auth: FirebaseAuth
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val json = Json { ignoreUnknownKeys = true }
+
+    // ── Auth helpers ──────────────────────────────────────────────────────────
+
+    fun getCurrentUser(): FirebaseUser? = auth.currentUser
+
+    fun signOut() = remote.signOut()
+
+    suspend fun signInAnonymously() = remote.signInAnonymously()
+
+    suspend fun signInWithEmailOrRegister(email: String, password: String) =
+        remote.signInWithEmailOrRegister(email, password)
+
+    /** Placeholder — requires Activity + provider setup; throws so caller can surface a message. */
+    suspend fun signInWithGoogle(): Unit = error("Google 登录需要 Activity 配合，请在 UI 层实现")
+
+    suspend fun signInWithGithub(): Unit = error("GitHub 登录需要 OAuth provider 流程，请在 UI 层实现")
+
+    suspend fun signInWithMicrosoft(): Unit = error("Microsoft 登录需要 OAuth provider 流程，请在 UI 层实现")
+
+    // ── Observations ─────────────────────────────────────────────────────────
 
     fun observeSessions(): Flow<List<Session>> =
         sessionDao.observeAll().map { list -> list.map { it.toDomain() } }
@@ -36,47 +60,45 @@ class BetterFlyRepository @Inject constructor(
     fun observeEventTypes(): Flow<List<EventType>> =
         eventTypeDao.observeAll().map { list -> list.map { it.toDomain() } }
 
+    // ── One-shot reads ────────────────────────────────────────────────────────
+
+    suspend fun getAllEventsOnce(): List<EventType> =
+        eventTypeDao.getAll().map { it.toDomain() }
+
+    suspend fun getAllSessionsOnce(): List<Session> =
+        sessionDao.getAll().map { it.toDomain() }
+
     suspend fun getActiveSession(eventId: String): Session? =
         sessionDao.getActiveForEvent(eventId)?.toDomain()
+
+    // ── Writes ────────────────────────────────────────────────────────────────
 
     suspend fun saveSession(session: Session) {
         sessionDao.upsert(session.toEntity())
         if (auth.currentUser != null) {
-            scope.launch {
-                runCatching { remote.pushSession(session) }
-            }
+            scope.launch { runCatching { remote.pushSession(session) } }
         }
     }
 
     suspend fun deleteSession(session: Session) {
         sessionDao.delete(session.toEntity())
         if (auth.currentUser != null) {
-            scope.launch {
-                runCatching { remote.tombstoneSession(session.id) }
-            }
+            scope.launch { runCatching { remote.tombstoneSession(session.id) } }
         }
     }
 
     suspend fun saveEventType(event: EventType) {
         eventTypeDao.upsert(event.toEntity())
         if (auth.currentUser != null) {
-            scope.launch {
-                runCatching { remote.pushEvent(event) }
-            }
+            scope.launch { runCatching { remote.pushEvent(event) } }
         }
     }
 
     suspend fun deleteEventType(event: EventType) {
-        // Delete all sessions for this event first
         sessionDao.deleteByEventId(event.id)
         eventTypeDao.delete(event.toEntity())
         if (auth.currentUser != null) {
-            scope.launch {
-                runCatching {
-                    remote.tombstoneEvent(event.id)
-                    // Also tombstone sessions
-                }
-            }
+            scope.launch { runCatching { remote.tombstoneEvent(event.id) } }
         }
     }
 
@@ -95,13 +117,11 @@ class BetterFlyRepository @Inject constructor(
             goalMetric = goal?.metric,
             goalPeriod = goal?.period,
             goalTargetValue = goal?.targetValue,
-            tags = tags.joinToString(",")
+            tagsJson = if (tags.isEmpty()) null else json.encodeToString(tags)
         )
         eventTypeDao.upsert(updated)
         if (auth.currentUser != null) {
-            scope.launch {
-                runCatching { remote.pushEvent(updated.toDomain()) }
-            }
+            scope.launch { runCatching { remote.pushEvent(updated.toDomain()) } }
         }
     }
 
@@ -112,49 +132,56 @@ class BetterFlyRepository @Inject constructor(
         }
     }
 
-    /** Full bidirectional sync — fetch remote, merge with local, push local-only items */
-    suspend fun fullSync(): Result<Unit> = runCatching {
-        val uid = auth.currentUser?.uid ?: error("Not logged in")
+    /** Alias used by SettingsViewModel */
+    suspend fun saveSettings(settings: UserSettings) = updateSettings(settings)
 
-        // --- Fetch remote ---
+    // ── Local utilities ───────────────────────────────────────────────────────
+
+    suspend fun clearLocalData() {
+        sessionDao.deleteAll()
+        eventTypeDao.deleteAll()
+    }
+
+    /** Remove duplicate sessions (same eventId + startTime). Returns count removed. */
+    suspend fun deduplicateLocalSessions(): Int {
+        val all = sessionDao.getAll()
+        val seen = mutableSetOf<String>()
+        var removed = 0
+        all.forEach { entity ->
+            val key = "${entity.eventId}_${entity.startTime}"
+            if (!seen.add(key)) {
+                sessionDao.delete(entity)
+                removed++
+            }
+        }
+        return removed
+    }
+
+    // ── Cloud sync ────────────────────────────────────────────────────────────
+
+    /** Full bidirectional sync — fetch remote, merge with local, push local-only items. */
+    suspend fun fullSync(): Result<Unit> = runCatching {
+        auth.currentUser?.uid ?: error("Not logged in")
+
         val remoteEvents = remote.fetchEvents()
         val remoteSessions = remote.fetchSessions()
         val remoteSettings = remote.fetchSettings()
 
-        // --- Merge events ---
         val localEvents = eventTypeDao.getAll().map { it.toDomain() }
         val remoteEventIds = remoteEvents.map { it.id }.toSet()
-        val localEventIds = localEvents.map { it.id }.toSet()
-
-        // Save all remote events locally
         remoteEvents.forEach { eventTypeDao.upsert(it.toEntity()) }
+        localEvents.filter { it.id !in remoteEventIds }.forEach { remote.pushEvent(it) }
 
-        // Push local-only events to remote
-        localEvents
-            .filter { it.id !in remoteEventIds }
-            .forEach { remote.pushEvent(it) }
-
-        // --- Merge sessions ---
         val localSessions = sessionDao.getAll().map { it.toDomain() }
         val remoteSessionIds = remoteSessions.map { it.id }.toSet()
-
-        // Save all remote sessions locally
         remoteSessions.forEach { sessionDao.upsert(it.toEntity()) }
+        localSessions.filter { it.id !in remoteSessionIds }.forEach { remote.pushSession(it) }
 
-        // Push local-only sessions to remote
-        localSessions
-            .filter { it.id !in remoteSessionIds }
-            .forEach { remote.pushSession(it) }
-
-        // --- Merge settings ---
-        if (remoteSettings != null) {
-            settingsStore.save(remoteSettings)
-        } else {
-            remote.pushSettings(settingsStore.getCurrent())
-        }
+        if (remoteSettings != null) settingsStore.save(remoteSettings)
+        else remote.pushSettings(settingsStore.getCurrent())
     }
 
-    /** Overwrite all cloud data with current local state */
+    /** Overwrite all cloud data with current local state. */
     suspend fun overwriteCloud(): Result<Unit> = runCatching {
         auth.currentUser?.uid ?: error("Not logged in")
         val events = eventTypeDao.getAll().map { it.toDomain() }
@@ -163,7 +190,7 @@ class BetterFlyRepository @Inject constructor(
         remote.overwriteAll(events, sessions, settings)
     }
 
-    /** Pull remote data and replace local */
+    /** Pull remote data and replace local. */
     suspend fun pullFromCloud(): Result<Unit> = runCatching {
         auth.currentUser?.uid ?: error("Not logged in")
         val events = remote.fetchEvents()
@@ -173,31 +200,4 @@ class BetterFlyRepository @Inject constructor(
         sessionDao.replaceAll(sessions.map { it.toEntity() })
         if (settings != null) settingsStore.save(settings)
     }
-
-    // --- Entity mappers ---
-    private fun Session.toEntity() = SessionEntity(
-        id = id, eventId = eventId, startTime = startTime, endTime = endTime,
-        note = note, incomplete = incomplete, rating = rating,
-        tags = tags.joinToString(",")
-    )
-
-    private fun SessionEntity.toDomain() = Session(
-        id = id, eventId = eventId, startTime = startTime, endTime = endTime,
-        note = note, incomplete = incomplete, rating = rating,
-        tags = if (tags.isNullOrBlank()) emptyList() else tags.split(",").map { it.trim() }.filter { it.isNotBlank() }
-    )
-
-    private fun EventType.toEntity() = EventTypeEntity(
-        id = id, name = name, color = color, archived = archived, createdAt = createdAt,
-        goalType = goal?.type, goalMetric = goal?.metric,
-        goalPeriod = goal?.period, goalTargetValue = goal?.targetValue,
-        tags = tags.joinToString(",")
-    )
-
-    private fun EventTypeEntity.toDomain() = EventType(
-        id = id, name = name, color = color, archived = archived, createdAt = createdAt,
-        goal = if (goalType != null && goalMetric != null && goalPeriod != null && goalTargetValue != null)
-            Goal(goalType, goalMetric, goalPeriod, goalTargetValue) else null,
-        tags = if (tags.isNullOrBlank()) emptyList() else tags.split(",").map { it.trim() }.filter { it.isNotBlank() }
-    )
 }

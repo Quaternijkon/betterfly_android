@@ -15,8 +15,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import kotlinx.serialization.encodeToString
 import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import javax.inject.Inject
 
@@ -70,8 +70,8 @@ class SettingsViewModel @Inject constructor(
 
     fun syncNow() {
         viewModelScope.launch {
-            val ok = repo.syncFromCloud()
-            _message.value = if (ok) "同步完成" else "同步失败（请先登录并联网）"
+            val result = repo.fullSync()
+            _message.value = if (result.isSuccess) "同步完成" else "同步失败（请先登录并联网）"
         }
     }
 
@@ -84,8 +84,8 @@ class SettingsViewModel @Inject constructor(
 
     fun overwriteCloud() {
         viewModelScope.launch {
-            val ok = repo.overwriteCloudWithLocal()
-            _message.value = if (ok) "已用本地数据覆盖云端" else "覆盖失败（请先登录并联网）"
+            val result = repo.overwriteCloud()
+            _message.value = if (result.isSuccess) "已用本地数据覆盖云端" else "覆盖失败（请先登录并联网）"
         }
     }
 
@@ -167,4 +167,4 @@ class SettingsViewModel @Inject constructor(
             }
         }
     }
-}
+} 

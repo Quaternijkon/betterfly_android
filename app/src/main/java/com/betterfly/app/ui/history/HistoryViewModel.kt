@@ -28,6 +28,6 @@ class HistoryViewModel @Inject constructor(
     }
 
     fun updateSession(session: Session) {
-        viewModelScope.launch { repo.updateSession(session) }
+        viewModelScope.launch { repo.saveSession(session) }
     }
 }
