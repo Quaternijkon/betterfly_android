@@ -10,38 +10,29 @@ interface SessionDao {
     fun observeAll(): Flow<List<SessionEntity>>
 
     @Query("SELECT * FROM sessions ORDER BY startTime DESC")
-    suspend fun getAllOnce(): List<SessionEntity>
+    suspend fun getAll(): List<SessionEntity>
 
-    @Query("SELECT * FROM sessions WHERE eventId = :eventId ORDER BY startTime DESC")
-    fun observeByEvent(eventId: String): Flow<List<SessionEntity>>
+    @Query("SELECT * FROM sessions WHERE eventId = :eventId AND endTime IS NULL LIMIT 1")
+    suspend fun getActiveForEvent(eventId: String): SessionEntity?
 
-    @Query("SELECT * FROM sessions WHERE endTime IS NULL LIMIT 1")
-    fun observeActiveSession(): Flow<SessionEntity?>
-
-    @Query("SELECT * FROM sessions WHERE endTime IS NULL")
-    suspend fun getAllActiveSessions(): List<SessionEntity>
-
-    @Query("SELECT * FROM sessions WHERE endTime IS NULL AND eventId = :eventId LIMIT 1")
-    suspend fun getActiveSession(eventId: String): SessionEntity?
-
-    @Query("SELECT * FROM sessions WHERE id = :id LIMIT 1")
+    @Query("SELECT * FROM sessions WHERE id = :id")
     suspend fun getById(id: String): SessionEntity?
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun upsert(entity: SessionEntity)
-
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun upsertAll(entities: List<SessionEntity>)
+    @Upsert
+    suspend fun upsert(session: SessionEntity)
 
     @Delete
-    suspend fun delete(entity: SessionEntity)
+    suspend fun delete(session: SessionEntity)
 
-    @Query("DELETE FROM sessions WHERE id = :id")
-    suspend fun deleteById(id: String)
+    @Query("DELETE FROM sessions WHERE eventId = :eventId")
+    suspend fun deleteByEventId(eventId: String)
 
     @Query("DELETE FROM sessions")
     suspend fun deleteAll()
 
-    @Query("SELECT * FROM sessions WHERE startTime >= :from AND startTime < :to ORDER BY startTime ASC")
-    suspend fun getSessionsInRange(from: Long, to: Long): List<SessionEntity>
+    @Transaction
+    suspend fun replaceAll(sessions: List<SessionEntity>) {
+        deleteAll()
+        sessions.forEach { upsert(it) }
+    }
 }

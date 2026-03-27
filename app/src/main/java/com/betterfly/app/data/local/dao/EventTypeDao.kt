@@ -6,30 +6,27 @@ import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface EventTypeDao {
-    @Query("SELECT * FROM event_types WHERE archived = 0 ORDER BY createdAt ASC")
-    fun observeActive(): Flow<List<EventTypeEntity>>
-
     @Query("SELECT * FROM event_types ORDER BY createdAt ASC")
     fun observeAll(): Flow<List<EventTypeEntity>>
 
     @Query("SELECT * FROM event_types ORDER BY createdAt ASC")
-    suspend fun getAllOnce(): List<EventTypeEntity>
+    suspend fun getAll(): List<EventTypeEntity>
 
-    @Query("SELECT * FROM event_types WHERE id = :id LIMIT 1")
+    @Query("SELECT * FROM event_types WHERE id = :id")
     suspend fun getById(id: String): EventTypeEntity?
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun upsert(entity: EventTypeEntity)
-
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun upsertAll(entities: List<EventTypeEntity>)
+    @Upsert
+    suspend fun upsert(event: EventTypeEntity)
 
     @Delete
-    suspend fun delete(entity: EventTypeEntity)
-
-    @Query("DELETE FROM event_types WHERE id = :id")
-    suspend fun deleteById(id: String)
+    suspend fun delete(event: EventTypeEntity)
 
     @Query("DELETE FROM event_types")
     suspend fun deleteAll()
+
+    @Transaction
+    suspend fun replaceAll(events: List<EventTypeEntity>) {
+        deleteAll()
+        events.forEach { upsert(it) }
+    }
 }

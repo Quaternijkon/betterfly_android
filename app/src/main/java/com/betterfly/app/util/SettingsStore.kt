@@ -1,44 +1,33 @@
 package com.betterfly.app.util
 
 import android.content.Context
-import androidx.datastore.preferences.core.Preferences
-import androidx.datastore.preferences.core.edit
-import androidx.datastore.preferences.core.intPreferencesKey
-import androidx.datastore.preferences.core.stringPreferencesKey
+import androidx.datastore.core.DataStore
+import androidx.datastore.preferences.core.*
 import androidx.datastore.preferences.preferencesDataStore
-import com.betterfly.app.data.PendingDeletes
-import com.betterfly.app.data.PendingSyncOp
 import com.betterfly.app.data.UserSettings
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
-import kotlinx.serialization.encodeToString
-import kotlinx.serialization.json.Json
-import kotlinx.serialization.builtins.ListSerializer
-import kotlinx.serialization.builtins.serializer
 import javax.inject.Inject
 import javax.inject.Singleton
 
-val Context.dataStore by preferencesDataStore(name = "settings")
-
-private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
+private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "betterfly_settings")
 
 @Singleton
-class SettingsStore @Inject constructor(@ApplicationContext private val ctx: Context) {
+class SettingsStore @Inject constructor(
+    @ApplicationContext private val context: Context
+) {
+    private val ds = context.dataStore
 
     private object Keys {
         val THEME_COLOR = stringPreferencesKey("theme_color")
         val WEEK_START = intPreferencesKey("week_start")
         val STOP_MODE = stringPreferencesKey("stop_mode")
-        val DARK_MODE = androidx.datastore.preferences.core.booleanPreferencesKey("dark_mode")
-
-        val PENDING_DELETES_JSON = stringPreferencesKey("pending_deletes_json")
-        val PENDING_SYNC_QUEUE_JSON = stringPreferencesKey("pending_sync_queue_json")
-        val OVERVIEW_LAYOUT_JSON = stringPreferencesKey("overview_layout_json")
+        val DARK_MODE = booleanPreferencesKey("dark_mode")
     }
 
-    val settings: Flow<UserSettings> = ctx.dataStore.data.map { prefs ->
+    val settings: Flow<UserSettings> = ds.data.map { prefs ->
         UserSettings(
             themeColor = prefs[Keys.THEME_COLOR] ?: "#4285F4",
             weekStart = prefs[Keys.WEEK_START] ?: 1,
@@ -47,76 +36,14 @@ class SettingsStore @Inject constructor(@ApplicationContext private val ctx: Con
         )
     }
 
+    suspend fun getCurrent(): UserSettings = settings.first()
+
     suspend fun save(s: UserSettings) {
-        ctx.dataStore.edit { prefs ->
+        ds.edit { prefs ->
             prefs[Keys.THEME_COLOR] = s.themeColor
             prefs[Keys.WEEK_START] = s.weekStart
             prefs[Keys.STOP_MODE] = s.stopMode
             prefs[Keys.DARK_MODE] = s.darkMode
-        }
-    }
-
-    val pendingDeletes: Flow<PendingDeletes> = ctx.dataStore.data.map { prefs ->
-        val raw = prefs[Keys.PENDING_DELETES_JSON]
-        if (raw.isNullOrBlank()) PendingDeletes()
-        else runCatching { json.decodeFromString<PendingDeletes>(raw) }.getOrElse { PendingDeletes() }
-    }
-
-    suspend fun setPendingDeletes(value: PendingDeletes) {
-        ctx.dataStore.edit { it[Keys.PENDING_DELETES_JSON] = json.encodeToString(value) }
-    }
-
-    suspend fun addPendingDelete(type: String, id: String) {
-        val now = pendingDeletes.first()
-        val updated = when (type) {
-            "sessions" -> now.copy(sessions = (now.sessions + id).distinct())
-            "events" -> now.copy(events = (now.events + id).distinct())
-            else -> now
-        }
-        setPendingDeletes(updated)
-    }
-
-    suspend fun clearPendingDeletes() {
-        ctx.dataStore.edit { it.remove(Keys.PENDING_DELETES_JSON) }
-    }
-
-    val pendingSyncQueue: Flow<List<PendingSyncOp>> = ctx.dataStore.data.map { prefs ->
-        val raw = prefs[Keys.PENDING_SYNC_QUEUE_JSON]
-        if (raw.isNullOrBlank()) emptyList()
-        else runCatching {
-            json.decodeFromString<List<PendingSyncOp>>(raw)
-        }.getOrElse { emptyList() }
-    }
-
-    suspend fun setPendingSyncQueue(queue: List<PendingSyncOp>) {
-        ctx.dataStore.edit {
-            if (queue.isEmpty()) it.remove(Keys.PENDING_SYNC_QUEUE_JSON)
-            else it[Keys.PENDING_SYNC_QUEUE_JSON] = json.encodeToString(queue)
-        }
-    }
-
-    suspend fun enqueueSync(op: PendingSyncOp) {
-        val q = pendingSyncQueue.first().toMutableList()
-        q.add(op)
-        setPendingSyncQueue(q)
-    }
-
-    suspend fun clearPendingSyncQueue() {
-        ctx.dataStore.edit { it.remove(Keys.PENDING_SYNC_QUEUE_JSON) }
-    }
-
-    val overviewLayout: Flow<List<String>> = ctx.dataStore.data.map { prefs ->
-        val raw = prefs[Keys.OVERVIEW_LAYOUT_JSON]
-        if (raw.isNullOrBlank()) emptyList()
-        else runCatching {
-            json.decodeFromString<List<String>>(raw)
-        }.getOrElse { emptyList() }
-    }
-
-    suspend fun setOverviewLayout(layout: List<String>) {
-        ctx.dataStore.edit {
-            if (layout.isEmpty()) it.remove(Keys.OVERVIEW_LAYOUT_JSON)
-            else it[Keys.OVERVIEW_LAYOUT_JSON] = json.encodeToString(layout)
         }
     }
 }
