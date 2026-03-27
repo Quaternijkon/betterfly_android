@@ -21,9 +21,28 @@ import androidx.compose.ui.unit.sp
 import com.betterfly.app.data.EventType
 import com.betterfly.app.data.Session
 import com.betterfly.app.data.UserSettings
+import com.betterfly.app.ui.theme.LocalThemeColor
 import com.betterfly.app.util.formatDuration
-import com.betterfly.app.util.formatDurationShort
 import com.betterfly.app.util.parseHexColor
+import java.util.*
+
+internal fun getPeriodStart(period: String, weekStart: Int): Long {
+    val cal = Calendar.getInstance()
+    when (period) {
+        "week" -> {
+            val firstDay = if (weekStart == 1) Calendar.MONDAY else Calendar.SUNDAY
+            while (cal.get(Calendar.DAY_OF_WEEK) != firstDay) cal.add(Calendar.DAY_OF_YEAR, -1)
+            cal.set(Calendar.HOUR_OF_DAY, 0); cal.set(Calendar.MINUTE, 0)
+            cal.set(Calendar.SECOND, 0); cal.set(Calendar.MILLISECOND, 0)
+        }
+        else -> {
+            cal.set(Calendar.DAY_OF_MONTH, 1)
+            cal.set(Calendar.HOUR_OF_DAY, 0); cal.set(Calendar.MINUTE, 0)
+            cal.set(Calendar.SECOND, 0); cal.set(Calendar.MILLISECOND, 0)
+        }
+    }
+    return cal.timeInMillis
+}
 
 @Composable
 internal fun EventCard(
@@ -45,165 +64,196 @@ internal fun EventCard(
         val periodSessions = sessions.filter { it.startTime >= periodStart }
         val current = when (goal.metric) {
             "count" -> periodSessions.size.toDouble()
-            else -> periodSessions.sumOf { it.durationSeconds ?: 0L }.toDouble() / 3600.0
+            else -> periodSessions.sumOf { (it.durationSeconds ?: 0L) }.toDouble() / 3600.0
         }
-        GoalProgress(current, goal.targetValue, goal.type, goal.metric)
+        GoalProgress(current = current, target = goal.targetValue, type = goal.type, metric = goal.metric)
     }
 
     val lastSession = sessions.maxByOrNull { it.startTime }
     val lastText = lastSession?.let {
         val ago = (now - it.startTime) / 1000L
         when {
-            ago < 60 -> "刚刚"
             ago < 3600 -> "${ago / 60}分钟前"
             ago < 86400 -> "${ago / 3600}小时前"
             else -> "${ago / 86400}天前"
         }
     }
-    val weekStart = getPeriodStart("week", settings.weekStart)
-    val weekCount = sessions.count { it.startTime >= weekStart }
+
+    // Streak / gap calculation
+    val completedSessions = sessions.filter { it.endTime != null && !it.incomplete }
+    val uniqueDays = completedSessions.map {
+        val sdf = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault())
+        sdf.format(java.util.Date(it.startTime))
+    }.toSortedSet().toList()
+    val todayKey = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault()).format(java.util.Date(now))
+    val yesterdayKey = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault()).format(java.util.Date(now - 86400_000L))
+    val currentStreak = if (uniqueDays.isEmpty()) 0 else {
+        val last = uniqueDays.last()
+        if (last == todayKey || last == yesterdayKey) {
+            var s = 1; var check = java.util.Date(java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault()).parse(last)!!.time - 86400_000L)
+            val sdf2 = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault())
+            while (uniqueDays.contains(sdf2.format(check))) { s++; check = java.util.Date(check.time - 86400_000L) }
+            s
+        } else 0
+    }
+    val currentGap = if (uniqueDays.isEmpty() || currentStreak > 0) 0 else {
+        val sdf3 = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault())
+        val lastDate = sdf3.parse(uniqueDays.last())?.time ?: now
+        ((now - lastDate) / 86400_000L).toInt()
+    }
 
     Card(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(20.dp),
+        shape = RoundedCornerShape(18.dp),
         colors = CardDefaults.cardColors(
-            containerColor = if (isActive) color.copy(alpha = 0.07f) else MaterialTheme.colorScheme.surface
+            containerColor = if (isActive) color.copy(alpha = 0.08f) else MaterialTheme.colorScheme.surface
         ),
-        elevation = CardDefaults.cardElevation(if (isActive) 6.dp else 2.dp),
-        border = if (isActive) BorderStroke(1.5.dp, color.copy(alpha = 0.5f)) else null
+        elevation = CardDefaults.cardElevation(defaultElevation = if (isActive) 4.dp else 1.dp),
+        border = if (isActive) BorderStroke(1.5.dp, color.copy(alpha = 0.4f)) else null
     ) {
         Column(Modifier.padding(16.dp)) {
-            EventCardHeader(event, isActive, elapsed, lastText, color, activeSession, onEdit, onStart, onStop)
-            if (!isActive && sessions.isNotEmpty()) {
-                Spacer(Modifier.height(10.dp))
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    MiniStatChip("共", "${sessions.size}次", color, Modifier.weight(1f))
-                    MiniStatChip("本周", "${weekCount}次", color, Modifier.weight(1f))
-                    lastSession?.durationSeconds?.let { dur ->
-                        MiniStatChip("上次", formatDurationShort(dur), color, Modifier.weight(1f))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    Modifier.size(42.dp).clip(CircleShape).background(color.copy(alpha = 0.15f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (isActive) {
+                        val transition = rememberInfiniteTransition(label = "pulse")
+                        val scale by transition.animateFloat(
+                            initialValue = 1f, targetValue = 1.5f,
+                            animationSpec = infiniteRepeatable(tween(800, easing = FastOutSlowInEasing), RepeatMode.Reverse),
+                            label = "s"
+                        )
+                        Box(Modifier.size((10 * scale).dp).clip(CircleShape).background(color))
+                    } else {
+                        Box(Modifier.size(12.dp).clip(CircleShape).background(color))
                     }
                 }
-            }
-            goalProgress?.let { gp ->
-                Spacer(Modifier.height(10.dp))
-                GoalProgressBar(gp, color)
-            }
-        }
-    }
-}
-
-@Composable
-private fun EventCardHeader(
-    event: EventType,
-    isActive: Boolean,
-    elapsed: Long,
-    lastText: String?,
-    color: Color,
-    activeSession: Session?,
-    onEdit: () -> Unit,
-    onStart: () -> Unit,
-    onStop: (Session) -> Unit
-) {
-    Row(verticalAlignment = Alignment.Top) {
-        Box(
-            Modifier.padding(top = 2.dp).size(44.dp).clip(CircleShape)
-                .background(color.copy(alpha = 0.15f)),
-            contentAlignment = Alignment.Center
-        ) {
-            if (isActive) {
-                val t = rememberInfiniteTransition(label = "pulse")
-                val scale by t.animateFloat(
-                    0.7f, 1.3f,
-                    infiniteRepeatable(tween(900, easing = FastOutSlowInEasing), RepeatMode.Reverse),
-                    label = "s"
-                )
-                Box(Modifier.size((12 * scale).dp).clip(CircleShape).background(color))
-            } else {
-                Box(Modifier.size(12.dp).clip(CircleShape).background(color))
-            }
-        }
-        Spacer(Modifier.width(12.dp))
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text(event.name, fontWeight = FontWeight.SemiBold, fontSize = 16.sp,
-                maxLines = 1, overflow = TextOverflow.Ellipsis)
-            if (isActive) {
-                Text(formatDuration(elapsed), color = color,
-                    fontWeight = FontWeight.Bold, fontSize = 22.sp,
-                    fontFamily = FontFamily.Monospace, letterSpacing = 1.sp)
-                Text("进行中…", style = MaterialTheme.typography.labelSmall,
-                    color = color.copy(alpha = 0.7f))
-            } else {
-                Text(lastText?.let { "上次: $it" } ?: "点击开始记录",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant)
-                if (event.tags.isNotEmpty()) {
-                    Text(event.tags.joinToString(" · "),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = color.copy(alpha = 0.7f))
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Text(
+                            event.name,
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 16.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f, fill = false)
+                        )
+                        if (event.archived) {
+                            Surface(
+                                color = MaterialTheme.colorScheme.surfaceVariant,
+                                shape = RoundedCornerShape(4.dp)
+                            ) {
+                                Text(
+                                    "已归档",
+                                    Modifier.padding(horizontal = 4.dp, vertical = 1.dp),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+                    if (isActive) {
+                        Text(
+                            formatDuration(elapsed),
+                            color = color,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 20.sp,
+                            fontFamily = FontFamily.Monospace
+                        )
+                    } else {
+                        Text(
+                            lastText?.let { "上次: $it" } ?: "点击开始记录",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    if (event.tags.isNotEmpty()) {
+                        Text(
+                            event.tags.joinToString(" · "),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = color.copy(alpha = 0.8f)
+                        )
+                    }
+                    if (!isActive) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            if (currentStreak > 0) {
+                                Text(
+                                    "连胜 ${currentStreak}天",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = color,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
+                            if (currentGap > 0) {
+                                Text(
+                                    "未做 ${currentGap}天",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = if (currentGap > 3) MaterialTheme.colorScheme.error
+                                            else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
+                        }
+                    }
+                }
+                IconButton(onClick = onEdit) {
+                    Icon(Icons.Default.Edit, "编辑", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                FilledIconButton(
+                    onClick = { if (isActive) onStop(activeSession!!) else onStart() },
+                    colors = IconButtonDefaults.filledIconButtonColors(containerColor = color)
+                ) {
+                    Icon(
+                        if (isActive) Icons.Default.Stop else Icons.Default.PlayArrow,
+                        if (isActive) "停止" else "开始",
+                        tint = Color.White
+                    )
                 }
             }
-        }
-        Column(horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            IconButton(onClick = onEdit, modifier = Modifier.size(36.dp)) {
-                Icon(Icons.Default.Edit, "编辑", Modifier.size(18.dp),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-            FilledIconButton(
-                onClick = { if (isActive) onStop(activeSession!!) else onStart() },
-                modifier = Modifier.size(44.dp),
-                colors = IconButtonDefaults.filledIconButtonColors(containerColor = color)
-            ) {
-                Icon(
-                    if (isActive) Icons.Default.Stop else Icons.Default.PlayArrow,
-                    if (isActive) "停止" else "开始",
-                    modifier = Modifier.size(22.dp), tint = Color.White
-                )
-            }
-        }
-    }
-}
 
-@Composable
-private fun GoalProgressBar(gp: GoalProgress, color: Color) {
-    val raw = (gp.current / gp.target).toFloat()
-    val progress = raw.coerceIn(0f, 1f)
-    val met = if (gp.type == "positive") gp.current >= gp.target else gp.current <= gp.target
-    val pc = when {
-        met -> Color(0xFF34A853)
-        gp.type == "negative" && raw > 0.8f -> Color(0xFFEA4335)
-        else -> color
-    }
-    val label = when (gp.metric) {
-        "count" -> "${gp.current.toInt()} / ${gp.target.toInt()} 次"
-        else -> "${"%,.1f".format(gp.current)} / ${gp.target} h"
-    }
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween, Alignment.CenterVertically) {
-            Text(if (gp.type == "positive") "目标: $label" else "限制: $label",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text(if (met) "✓ 达成" else "${(raw * 100).toInt()}%",
-                style = MaterialTheme.typography.labelSmall,
-                color = pc, fontWeight = FontWeight.Bold)
-        }
-        LinearProgressIndicator(
-            progress = { progress },
-            modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)),
-            color = pc, trackColor = pc.copy(alpha = 0.12f)
-        )
-    }
-}
-
-@Composable
-private fun MiniStatChip(label: String, value: String, color: Color, modifier: Modifier = Modifier) {
-    Surface(modifier, shape = RoundedCornerShape(8.dp), color = color.copy(alpha = 0.08f)) {
-        Column(Modifier.padding(vertical = 6.dp, horizontal = 8.dp),
-            horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(label, style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f), fontSize = 10.sp)
-            Text(value, style = MaterialTheme.typography.labelMedium,
-                color = color, fontWeight = FontWeight.Bold)
+            goalProgress?.let { gp ->
+                Spacer(Modifier.height(10.dp))
+                val rawProgress = (gp.current / gp.target).toFloat()
+                val progress = rawProgress.coerceIn(0f, 1f)
+                val isGoalMet = if (gp.type == "positive") gp.current >= gp.target
+                                else gp.current <= gp.target
+                val progressColor = when {
+                    isGoalMet -> Color(0xFF34A853)
+                    gp.type == "negative" && rawProgress > 0.8f -> Color(0xFFEA4335)
+                    else -> color
+                }
+                val label = when (gp.metric) {
+                    "count" -> "${gp.current.toInt()} / ${gp.target.toInt()} 次"
+                    else -> "${"%.1f".format(gp.current)} / ${gp.target} h"
+                }
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        if (gp.type == "positive") "目标" else "限制",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    LinearProgressIndicator(
+                        progress = { progress },
+                        modifier = Modifier.weight(1f).height(6.dp).clip(RoundedCornerShape(3.dp)),
+                        color = progressColor,
+                        trackColor = progressColor.copy(alpha = 0.15f)
+                    )
+                    Text(
+                        label + if (isGoalMet) " ✓" else "",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = progressColor,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+            }
         }
     }
 }

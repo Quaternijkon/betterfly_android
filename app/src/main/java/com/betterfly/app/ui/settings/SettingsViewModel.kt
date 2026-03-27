@@ -82,7 +82,7 @@ class SettingsViewModel @Inject constructor(
     }
 
     fun signInWithGoogleCredential(credential: AuthCredential) = viewModelScope.launch {
-        runCatching { auth.signInWithCredential(credential).also { kotlinx.coroutines.tasks.await(it) } }
+        runCatching { kotlinx.coroutines.tasks.await(auth.signInWithCredential(credential)) }
             .onSuccess { _message.value = "Google 登录成功" }
             .onFailure { _message.value = "Google 登录失败：${it.message}" }
     }
